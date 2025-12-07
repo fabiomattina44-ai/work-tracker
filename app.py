@@ -8,7 +8,7 @@ import os
 import pytz
 
 # --- CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="Work Tracker", page_icon="⏱️", layout="centered")
+st.set_page_config(page_title="Il conta lavoro", page_icon="⏱️", layout="centered")
 
 # --- GESTIONE DATABASE ---
 DB_NAME = "lavoro.db"
