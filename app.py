@@ -5,12 +5,22 @@ import streamlit as st
 import pandas as pd
 import time
 import os
+import pytz
 
 # --- CONFIGURAZIONE PAGINA ---
 st.set_page_config(page_title="Work Tracker", page_icon="⏱️", layout="centered")
 
 # --- GESTIONE DATABASE ---
 DB_NAME = "lavoro.db"
+
+def get_now_it():
+    # Ottiene l'ora corrente con fuso orario Roma
+    tz = pytz.timezone('Europe/Rome')
+    now_aware = datetime.datetime.now(tz)
+    # Rimuove le info sul fuso (tzinfo) per renderlo compatibile 
+    # con i calcoli "naive" e con SQLite che hai già scritto.
+    # Restituisce un oggetto datetime "pulito" ma con l'orario giusto.
+    return now_aware.replace(tzinfo=None)
 
 def get_connection():
     return sqlite3.connect(DB_NAME, check_same_thread=False)
@@ -132,7 +142,7 @@ with tab1:
         if st.button("⏹️ FERMA", type="primary", use_container_width=True):
             conn = get_connection()
             start_dt = datetime.datetime.strptime(active[1], "%Y-%m-%d %H:%M:%S")
-            end_dt = datetime.datetime.now()
+            end_dt = get_now_it()
             mins = int((end_dt - start_dt).total_seconds() / 60)
             if mins < 1:
                 conn.execute("DELETE FROM sessions WHERE id=?", (active[0],))
@@ -149,7 +159,7 @@ with tab1:
     else:
         if st.button("▶️ AVVIA", type="primary", use_container_width=True):
             conn = get_connection()
-            conn.execute("INSERT INTO sessions (start_time) VALUES (?)", (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),))
+            conn.execute("INSERT INTO sessions (start_time) VALUES (?)", (get_now_it().strftime("%Y-%m-%d %H:%M:%S"),))
             conn.commit()
             conn.close()
             st.rerun()
@@ -181,7 +191,7 @@ with tab2:
 
 with tab3:
     st.header("Stipendio")
-    mese = st.text_input("Mese", datetime.datetime.now().strftime("%Y-%m"))
+    mese = st.text_input("Mese", get_now_it().strftime("%Y-%m"))
     conn = get_connection()
     df = pd.read_sql("SELECT * FROM sessions WHERE start_time LIKE ? AND end_time IS NOT NULL ORDER BY start_time DESC", conn, params=(f'{mese}%',))
     conn.close()
