@@ -8,7 +8,7 @@ import os
 import pytz
 
 # --- CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="Il Conta Lavoro", page_icon="⏱️", layout="centered")
+st.set_page_config(page_title="Work Tracker", page_icon="⏱️", layout="centered")
 
 # --- GESTIONE FUSO ORARIO ITALIANO ---
 def get_ita_now():
@@ -104,12 +104,11 @@ def calcola_guadagno_sessione(start_dt, end_dt):
 
 # --- INTERFACCIA ---
 init_db()
-st.title("Il Conta Lavoro")
+st.title("📱 Work Tracker Pro (ITA)")
 
 # SIDEBAR BACKUP
 with st.sidebar:
     st.header("💾 Gestione Dati")
-    st.info("Scarica il backup per sicurezza!")
     if os.path.exists(DB_NAME):
         with open(DB_NAME, "rb") as file:
             st.download_button("⬇️ Scarica Backup (.db)", file, file_name="backup_lavoro.db")
@@ -118,11 +117,11 @@ with st.sidebar:
         if st.button("Sovrascrivi dati attuali"):
             with open(DB_NAME, "wb") as f:
                 f.write(uploaded_file.getbuffer())
-            st.success("Database ripristinato! Ricarica...")
+            st.success("Ripristinato! Ricarica...")
             time.sleep(2)
             st.rerun()
 
-st.markdown("""<style>div.stButton > button:first-child {height: 3em; font-size: 20px; border-radius: 10px;}</style>""", unsafe_allow_html=True)
+st.markdown("""<style>div.stButton > button:first-child {height: 3em; font-size: 18px; border-radius: 8px;}</style>""", unsafe_allow_html=True)
 
 tab1, tab2, tab3, tab4 = st.tabs(["⏱️", "🗓️", "💰", "⚙️"])
 
@@ -162,37 +161,54 @@ with tab1:
             conn.close()
             st.rerun()
 
-# TAB 2: TURNI
+# TAB 2: TURNI (MODIFICATA PER CANCELLAZIONE SINGOLA)
 with tab2:
     st.header("Turni")
     conn = get_connection()
-    df = pd.read_sql("SELECT weekday, start_hm, end_hm FROM shifts ORDER BY weekday, start_hm", conn)
+    # Recuperiamo anche l'ID per poter cancellare
+    df = pd.read_sql("SELECT id, weekday, start_hm, end_hm FROM shifts ORDER BY weekday, start_hm", conn)
     conn.close()
     map_g = {0:"Lunedì", 1:"Martedì", 2:"Mercoledì", 3:"Giovedì", 4:"Venerdì", 5:"Sabato", 6:"Domenica"}
-    if not df.empty:
-        df["Giorno"] = df["weekday"].map(map_g)
-        st.dataframe(df[["Giorno", "start_hm", "end_hm"]], hide_index=True, use_container_width=True)
-    else: st.warning("Nessun turno (Tutto Straordinario)")
     
-    col_del, col_add = st.columns([1,2])
-    with col_del:
-        if st.button("🗑️ Reset"):
-            conn=get_connection(); conn.execute("DELETE FROM shifts"); conn.commit(); conn.close(); st.rerun()
-    with col_add:
-        with st.form("a"):
-            d=st.selectbox("Giorno", list(map_g.keys()), format_func=lambda x: map_g[x])
-            c1,c2=st.columns(2)
-            s=c1.time_input("Start", datetime.time(9,0)); e=c2.time_input("End", datetime.time(18,0))
-            if st.form_submit_button("Salva"):
-                conn=get_connection()
-                conn.execute("INSERT INTO shifts (weekday, start_hm, end_hm) VALUES (?,?,?)", (d, s.strftime("%H:%M"), e.strftime("%H:%M")))
-                conn.commit(); conn.close(); st.rerun()
+    st.write("Turni Attuali:")
+    if df.empty:
+        st.warning("Nessun turno salvato.")
+    else:
+        # Loop per creare una riga per ogni turno con bottone elimina
+        for index, row in df.iterrows():
+            col_info, col_del = st.columns([4, 1])
+            giorno_nome = map_g[row['weekday']]
+            with col_info:
+                st.write(f"**{giorno_nome}**: {row['start_hm']} - {row['end_hm']}")
+            with col_del:
+                if st.button("🗑️", key=f"del_shift_{row['id']}"):
+                    conn = get_connection()
+                    conn.execute("DELETE FROM shifts WHERE id=?", (row['id'],))
+                    conn.commit()
+                    conn.close()
+                    st.rerun()
+        st.divider()
 
-# TAB 3: STIPENDIO (MODIFICATA)
+    # Form Aggiunta
+    with st.form("add_shift"):
+        st.write("➕ Aggiungi Turno")
+        d = st.selectbox("Giorno", list(map_g.keys()), format_func=lambda x: map_g[x])
+        c1, c2 = st.columns(2)
+        s = c1.time_input("Start", datetime.time(9,0))
+        e = c2.time_input("End", datetime.time(18,0))
+        if st.form_submit_button("Salva Turno"):
+            conn = get_connection()
+            conn.execute("INSERT INTO shifts (weekday, start_hm, end_hm) VALUES (?,?,?)", (d, s.strftime("%H:%M"), e.strftime("%H:%M")))
+            conn.commit()
+            conn.close()
+            st.rerun()
+
+# TAB 3: STIPENDIO (MODIFICATA PER CANCELLAZIONE SESSIONI)
 with tab3:
     st.header("Stipendio")
     mese = st.text_input("Mese", get_ita_now().strftime("%Y-%m"))
     conn = get_connection()
+    # Recuperiamo anche l'ID
     df = pd.read_sql("SELECT * FROM sessions WHERE start_time LIKE ? AND end_time IS NOT NULL ORDER BY start_time DESC", conn, params=(f'{mese}%',))
     conn.close()
     
@@ -203,28 +219,41 @@ with tab3:
         c1,c2 = st.columns(2)
         c1.metric("€ Tot", f"{tot_euro:.2f}")
         c2.metric("Ore Tot", f"{tot_min//60}h {tot_min%60}m")
-        st.dataframe(df[["start_time", "end_time", "total_pay"]], use_container_width=True)
         
-        # --- GENERATORE FILE TXT ---
-        txt_output = [f"--- RESOCONTO LAVORO: {mese} ---\n"]
-        for _, row in df.iterrows():
-            giorno = row['start_time'][8:10] # Giorno
-            ora_ini = row['start_time'][11:16]
-            ora_fin = row['end_time'][11:16]
-            durata = f"{row['total_minutes']//60}h {row['total_minutes']%60}m"
-            money = f"€ {row['total_pay']:.2f}"
+        st.divider()
+        st.subheader("Dettaglio Sessioni")
+        st.caption("Clicca sulla freccia per espandere ed eliminare.")
+
+        # Loop per mostrare expander interattivi
+        for index, row in df.iterrows():
+            giorno_breve = row['start_time'][5:10] # MM-DD
+            ora_breve = row['start_time'][11:16]
+            label = f"{giorno_breve} ({ora_breve}) - € {row['total_pay']:.2f}"
             
-            # Riga formattata: 📅 07 | ⏰ 09:00-18:00 | ⏱️ 9h 0m | 💰 € 80.00
-            line = f"📅 {giorno} | ⏰ {ora_ini}-{ora_fin} | ⏱️ {durata} | 💰 {money}"
+            with st.expander(label):
+                st.write(f"📅 **Inizio:** {row['start_time']}")
+                st.write(f"🛑 **Fine:** {row['end_time']}")
+                st.write(f"⏱️ **Durata:** {row['total_minutes']//60}h {row['total_minutes']%60}m")
+                st.write(f"💰 **Guadagno:** € {row['total_pay']:.2f}")
+                
+                # Tasto eliminazione singola sessione
+                if st.button("❌ Elimina questa sessione", key=f"del_sess_{row['id']}"):
+                    conn = get_connection()
+                    conn.execute("DELETE FROM sessions WHERE id=?", (row['id'],))
+                    conn.commit()
+                    conn.close()
+                    st.success("Cancellata!")
+                    time.sleep(1)
+                    st.rerun()
+
+        # Generazione TXT
+        txt_output = [f"--- RESOCONTO: {mese} ---\n"]
+        for _, row in df.iterrows():
+            line = f"📅 {row['start_time'][8:10]} | ⏰ {row['start_time'][11:16]}-{row['end_time'][11:16]} | 💰 € {row['total_pay']:.2f}"
             txt_output.append(line)
-        
         txt_output.append("\n" + "="*30)
-        txt_output.append(f"TOTALE ORE: {tot_min//60}h {tot_min%60}m")
-        txt_output.append(f"TOTALE STIPENDIO: € {tot_euro:.2f}")
-        
-        final_text = "\n".join(txt_output)
-        
-        st.download_button("📄 Scarica Resoconto (.txt)", final_text, file_name=f"Stipendio_{mese}.txt")
+        txt_output.append(f"TOTALE: € {tot_euro:.2f}")
+        st.download_button("📄 Scarica TXT", "\n".join(txt_output), file_name=f"Stipendio_{mese}.txt")
 
 # TAB 4: SETUP
 with tab4:
