@@ -8,7 +8,7 @@ import os
 import pytz
 
 # --- CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="Il conta lavoro", page_icon="⏱️", layout="centered")
+st.set_page_config(page_title="Il Conta Lavoro", page_icon="⏱️", layout="centered")
 
 # --- GESTIONE DATABASE ---
 DB_NAME = "lavoro.db"
@@ -104,7 +104,7 @@ def calcola_guadagno_sessione(start_dt, end_dt):
 
 # --- INTERFACCIA ---
 init_db()
-st.title("📱 Work Tracker Pro")
+st.title("Il Conta Lavoro")
 
 # SIDEBAR PER BACKUP DATI
 with st.sidebar:
