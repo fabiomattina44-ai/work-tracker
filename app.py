@@ -8,7 +8,7 @@ import os
 import pytz
 
 # --- CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="Work Tracker", page_icon="⏱️", layout="centered")
+st.set_page_config(page_title="Il Conta Lavoro", page_icon="⏱️", layout="centered")
 
 # --- GESTIONE FUSO ORARIO ITALIANO ---
 def get_ita_now():
@@ -104,7 +104,7 @@ def calcola_guadagno_sessione(start_dt, end_dt):
 
 # --- INTERFACCIA ---
 init_db()
-st.title("📱 Work Tracker Pro (ITA)")
+st.title("Il Conta Lavoro")
 
 # SIDEBAR BACKUP
 with st.sidebar:
