@@ -10,17 +10,14 @@ import pytz
 # --- CONFIGURAZIONE PAGINA ---
 st.set_page_config(page_title="Il Conta Lavoro", page_icon="⏱️", layout="centered")
 
+# --- GESTIONE FUSO ORARIO ITALIANO ---
+def get_ita_now():
+    """Restituisce l'orario attuale in Italia gestendo fuso e ora legale."""
+    tz_ita = pytz.timezone('Europe/Rome')
+    return datetime.datetime.now(tz_ita)
+
 # --- GESTIONE DATABASE ---
 DB_NAME = "lavoro.db"
-
-def get_now_it():
-    # Ottiene l'ora corrente con fuso orario Roma
-    tz = pytz.timezone('Europe/Rome')
-    now_aware = datetime.datetime.now(tz)
-    # Rimuove le info sul fuso (tzinfo) per renderlo compatibile 
-    # con i calcoli "naive" e con SQLite che hai già scritto.
-    # Restituisce un oggetto datetime "pulito" ma con l'orario giusto.
-    return now_aware.replace(tzinfo=None)
 
 def get_connection():
     return sqlite3.connect(DB_NAME, check_same_thread=False)
@@ -81,8 +78,11 @@ def calcola_guadagno_sessione(start_dt, end_dt):
     
     totale = 0.0
     it_holidays = holidays.IT()
-    curr = start_dt
-    while curr < end_dt:
+    
+    curr = start_dt.replace(tzinfo=None)
+    end_naive = end_dt.replace(tzinfo=None)
+    
+    while curr < end_naive:
         mult = 1.0
         ora = curr.hour
         is_notte = (inizio_notturno < 6 and inizio_notturno <= ora < 6) or (inizio_notturno >= 6 and (ora >= inizio_notturno or ora < 6))
@@ -106,31 +106,27 @@ def calcola_guadagno_sessione(start_dt, end_dt):
 init_db()
 st.title("Il Conta Lavoro")
 
-# SIDEBAR PER BACKUP DATI
+# SIDEBAR BACKUP
 with st.sidebar:
     st.header("💾 Gestione Dati")
-    st.info("I server gratuiti possono resettarsi. Scarica spesso il backup!")
-    
-    # Download
+    st.info("Scarica il backup per sicurezza!")
     if os.path.exists(DB_NAME):
         with open(DB_NAME, "rb") as file:
             st.download_button("⬇️ Scarica Backup (.db)", file, file_name="backup_lavoro.db")
-    
-    # Upload
     uploaded_file = st.file_uploader("⬆️ Carica un backup", type="db")
     if uploaded_file is not None:
         if st.button("Sovrascrivi dati attuali"):
             with open(DB_NAME, "wb") as f:
                 f.write(uploaded_file.getbuffer())
-            st.success("Database ripristinato! Ricarica la pagina.")
+            st.success("Database ripristinato! Ricarica...")
             time.sleep(2)
             st.rerun()
 
-# CSS Mobile
 st.markdown("""<style>div.stButton > button:first-child {height: 3em; font-size: 20px; border-radius: 10px;}</style>""", unsafe_allow_html=True)
 
 tab1, tab2, tab3, tab4 = st.tabs(["⏱️", "🗓️", "💰", "⚙️"])
 
+# TAB 1: TRACKER
 with tab1:
     st.header("Tracker")
     conn = get_connection()
@@ -142,7 +138,8 @@ with tab1:
         if st.button("⏹️ FERMA", type="primary", use_container_width=True):
             conn = get_connection()
             start_dt = datetime.datetime.strptime(active[1], "%Y-%m-%d %H:%M:%S")
-            end_dt = get_now_it()
+            end_dt = get_ita_now().replace(tzinfo=None)
+            
             mins = int((end_dt - start_dt).total_seconds() / 60)
             if mins < 1:
                 conn.execute("DELETE FROM sessions WHERE id=?", (active[0],))
@@ -159,11 +156,13 @@ with tab1:
     else:
         if st.button("▶️ AVVIA", type="primary", use_container_width=True):
             conn = get_connection()
-            conn.execute("INSERT INTO sessions (start_time) VALUES (?)", (get_now_it().strftime("%Y-%m-%d %H:%M:%S"),))
+            now_ita = get_ita_now().strftime("%Y-%m-%d %H:%M:%S")
+            conn.execute("INSERT INTO sessions (start_time) VALUES (?)", (now_ita,))
             conn.commit()
             conn.close()
             st.rerun()
 
+# TAB 2: TURNI
 with tab2:
     st.header("Turni")
     conn = get_connection()
@@ -189,18 +188,45 @@ with tab2:
                 conn.execute("INSERT INTO shifts (weekday, start_hm, end_hm) VALUES (?,?,?)", (d, s.strftime("%H:%M"), e.strftime("%H:%M")))
                 conn.commit(); conn.close(); st.rerun()
 
+# TAB 3: STIPENDIO (MODIFICATA)
 with tab3:
     st.header("Stipendio")
-    mese = st.text_input("Mese", get_now_it().strftime("%Y-%m"))
+    mese = st.text_input("Mese", get_ita_now().strftime("%Y-%m"))
     conn = get_connection()
     df = pd.read_sql("SELECT * FROM sessions WHERE start_time LIKE ? AND end_time IS NOT NULL ORDER BY start_time DESC", conn, params=(f'{mese}%',))
     conn.close()
+    
     if not df.empty:
+        tot_euro = df['total_pay'].sum()
+        tot_min = df['total_minutes'].sum()
+        
         c1,c2 = st.columns(2)
-        c1.metric("€ Tot", f"{df['total_pay'].sum():.2f}")
-        c2.metric("Ore Tot", f"{df['total_minutes'].sum()//60}h {df['total_minutes'].sum()%60}m")
+        c1.metric("€ Tot", f"{tot_euro:.2f}")
+        c2.metric("Ore Tot", f"{tot_min//60}h {tot_min%60}m")
         st.dataframe(df[["start_time", "end_time", "total_pay"]], use_container_width=True)
+        
+        # --- GENERATORE FILE TXT ---
+        txt_output = [f"--- RESOCONTO LAVORO: {mese} ---\n"]
+        for _, row in df.iterrows():
+            giorno = row['start_time'][8:10] # Giorno
+            ora_ini = row['start_time'][11:16]
+            ora_fin = row['end_time'][11:16]
+            durata = f"{row['total_minutes']//60}h {row['total_minutes']%60}m"
+            money = f"€ {row['total_pay']:.2f}"
+            
+            # Riga formattata: 📅 07 | ⏰ 09:00-18:00 | ⏱️ 9h 0m | 💰 € 80.00
+            line = f"📅 {giorno} | ⏰ {ora_ini}-{ora_fin} | ⏱️ {durata} | 💰 {money}"
+            txt_output.append(line)
+        
+        txt_output.append("\n" + "="*30)
+        txt_output.append(f"TOTALE ORE: {tot_min//60}h {tot_min%60}m")
+        txt_output.append(f"TOTALE STIPENDIO: € {tot_euro:.2f}")
+        
+        final_text = "\n".join(txt_output)
+        
+        st.download_button("📄 Scarica Resoconto (.txt)", final_text, file_name=f"Stipendio_{mese}.txt")
 
+# TAB 4: SETUP
 with tab4:
     st.header("Setup")
     def ui(k, l, fl=True):
